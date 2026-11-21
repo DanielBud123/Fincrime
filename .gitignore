@@ -1,0 +1,12 @@
+# Participant-only data: never commit
+screening-track/screening/dev/
+screening-track/screening/*.xlsx
+*.xlsx
+*.zip
+
+# Local artefacts
+__pycache__/
+*.pyc
+.cache/
+.pytest_cache/
+screening-track/screening/output/*.tmp
