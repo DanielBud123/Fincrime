@@ -22,7 +22,7 @@ Two proposed changes, **not made until you agree**:
    - `hit.dob_source_ids` (empty when from the `dobs` field/profile notes, SR ids when from search), `hit.report_source_ids`, `hit.death_source_ids`
    Keep `source_ids` as the union for fallback.
 
-3. **Repo layout.** Code lives in `system/src`, `system/tests`, `system/docs` so it ships in the submitted `system/` folder. `.gitignore` excludes `dev/`, `*.jsonl`, `.env` (brief: never commit data or API key). OK?
+3. **Repo layout.** Code lives in `system/src`, `system/tests`, `system/docs` so it ships in the submitted `system/` folder. `.gitignore` excludes `dev/`, `.env` (brief: never commit data or API key). OK?
 
 ## STOP 2 heads-up — names.py follows POLICY §8, not CLAUDE.md
 
