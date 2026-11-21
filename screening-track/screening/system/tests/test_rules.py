@@ -159,5 +159,24 @@ class TestHitExtraction(unittest.TestCase):
         self.assertEqual([m.group(1) for m in REPORT_LINE_RE.finditer(notes)], ["June 10, 2014"])
 
 
+
+class TestCustomerNotes(unittest.TestCase):
+    def test_residence_wording(self):
+        from customer_facts import residence_countries
+        self.assertEqual(residence_countries({"text": "The client confirmed their employment and residency in Denmark from 2016 to 2018."}), ["DK"])
+        self.assertEqual(residence_countries({"text": "Confirmed address in Portugal."}), ["PT"])
+        self.assertEqual(residence_countries({"text": "Customer asked how long an international transfer to Germany takes."}), [])
+        self.assertEqual(residence_countries({"text": "Customer sent money to family in Nigeria."}), [])
+
+    def test_identity_note_parsing(self):
+        from customer_facts import _name_from_note, _dob_from_note, NEGATIVE_RE
+        from dates import parse_date
+        note = "On 2024-03-21, Onfido verified the driving licence for TASLIMA RAHIM ISLAM (DOB 1994-05-04), originating from Bangladesh."
+        self.assertEqual(_name_from_note(note), "TASLIMA RAHIM ISLAM")
+        self.assertEqual(_dob_from_note(note, parse_date("2024-03-21")).iso(), "1994-05-04")
+        self.assertIsNone(_name_from_note("Persona: ANA LOPEZ and JUAN LOPEZ verified 2024-01-02."))
+        self.assertIsNone(_dob_from_note("Onfido verified ANA LOPEZ, 1980-05-01, passport Spain, 2023-12-31.", parse_date("2024-01-02")))
+        self.assertTrue(NEGATIVE_RE.search("Identity check for ANA LOPEZ failed on 2024-01-02: document expired."))
+
 if __name__ == "__main__":
     unittest.main()

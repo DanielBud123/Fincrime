@@ -6,6 +6,10 @@ HIT  ------------------------------------------------> hit picture ------+
 
 Every hit always gets a line. If anything fails for a hit it is answered
 REVIEW / INSUFFICIENT_DATA, the safe side; the failure is logged to stderr.
+
+An optional diagnostics file records, per hit, the facts found on each side,
+the record each came from, what was unknown and which contradiction was seen
+but not relied on. It is not part of the submission format.
 """
 from __future__ import annotations
 
@@ -13,7 +17,9 @@ import json
 import sys
 import time
 import traceback
+from dataclasses import asdict
 from pathlib import Path
+from typing import Optional
 
 from customer_facts import build_customer_facts
 from decide import decide
@@ -37,10 +43,12 @@ class Pipeline:
     """Holds the loaded data and caches the customer side per alert, since an
     alert's hits all share the same customer."""
 
-    def __init__(self, data: Data, log=sys.stderr):
+    def __init__(self, data: Data, log=sys.stderr, keep_diagnostics: bool = False):
         self.data = data
         self.log = log
         self._customers: dict[str, list] = {}
+        self.keep_diagnostics = keep_diagnostics
+        self.diagnostics: list[dict] = []
 
     def customer_cards(self, alert: dict):
         aid = alert["alert_id"]
@@ -49,11 +57,25 @@ class Pipeline:
             self._customers[aid] = [build_customer_facts(self.data, c.record_ids, c.link).facts for c in cands]
         return self._customers[aid]
 
-    def decide_one(self, alert: dict | None, hit: dict) -> Decision:
+    def _diagnose(self, decision: Decision, hit_facts=None, per_candidate=None, note: Optional[str] = None):
+        if not self.keep_diagnostics:
+            return
+        self.diagnostics.append({
+            "hit_id": decision.hit_id, "alert_id": decision.alert_id,
+            "decision": decision.decision, "reason_code": decision.reason_code,
+            "customer_record_id": decision.resolved_customer_id,
+            "hit": asdict(hit_facts) if hit_facts else None,
+            "candidates": per_candidate or [],
+            "note": note,
+        })
+
+    def decide_one(self, alert: Optional[dict], hit: dict) -> Decision:
         hit_id = hit["hit_id"]
         if alert is None:
-            return safety_net(hit.get("alert_id"), hit_id,
-                              "The hit's alert is not in alerts.jsonl, so the customer cannot be resolved.")
+            d = safety_net(hit.get("alert_id"), hit_id,
+                           "The hit's alert is not in alerts.jsonl, so the customer cannot be resolved.")
+            self._diagnose(d, note="alert missing")
+            return d
         alert_id = alert["alert_id"]
         customers = self.customer_cards(alert)
         hit_facts = build_hit_facts(self.data, hit)
@@ -61,16 +83,21 @@ class Pipeline:
             s = screened(alert)
             link = "account" if alert.get("account_ref") else "login" if alert.get("login_handle") \
                 else "email" if alert.get("email") else "none"
-            return explain_no_customer(alert_id, hit_id, s.get("name") or "the screened customer", link)
-        results = []
+            d = explain_no_customer(alert_id, hit_id, s.get("name") or "the screened customer", link)
+            self._diagnose(d, hit_facts, note="no customer record fits the alert")
+            return d
+        results, per_candidate = [], []
         for cust in customers:
             card = FactCard(alert_id=alert_id, hit_id=hit_id, screened_at=alert.get("screened_at"),
                             customer=cust, hit=hit_facts)
             decision, assessment = decide(card, self.data.variants)
             results.append((explain(card, decision, assessment), card))
-        if len(results) == 1:
-            return results[0][0]
-        return explain_ambiguous(alert_id, hit_id, results)
+            if self.keep_diagnostics:
+                per_candidate.append({"customer": asdict(cust), "decision": decision.decision,
+                                      "reason_code": decision.reason_code, "assessment": asdict(assessment)})
+        final = results[0][0] if len(results) == 1 else explain_ambiguous(alert_id, hit_id, results)
+        self._diagnose(final, hit_facts, per_candidate)
+        return final
 
     def decide_all(self) -> list[Decision]:
         decisions: list[Decision] = []
@@ -80,25 +107,34 @@ class Pipeline:
                 decisions.append(self.decide_one(self.data.alerts.get(hit.get("alert_id")), hit))
             except Exception:  # fail closed: a crash must never clear a hit
                 print(f"[warn] {hit_id}: {traceback.format_exc().splitlines()[-1]}", file=self.log)
-                decisions.append(safety_net(hit.get("alert_id"), hit_id))
+                d = safety_net(hit.get("alert_id"), hit_id)
+                decisions.append(d)
+                self._diagnose(d, note="the pipeline failed on this hit")
         return decisions
 
 
+def write_jsonl(rows: list[dict], path) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False, sort_keys=False) + "\n")
+
+
 def write_output(decisions: list[Decision], out_path) -> None:
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "w", encoding="utf-8") as f:
-        for d in decisions:
-            f.write(json.dumps(d.to_output_line(), ensure_ascii=False) + "\n")
+    write_jsonl([d.to_output_line() for d in decisions], out_path)
 
 
-def run(data_dir, out_path, log=sys.stderr) -> list[Decision]:
+def run(data_dir, out_path, diagnostics_path=None, log=sys.stderr) -> list[Decision]:
     t0 = time.time()
     data = load(data_dir)
     print(f"[info] loaded {len(data.alerts)} alerts, {len(data.hits)} hits, "
           f"{len(data.customers)} customers in {time.time() - t0:.1f}s", file=log)
-    decisions = Pipeline(data, log).decide_all()
+    pipeline = Pipeline(data, log, keep_diagnostics=bool(diagnostics_path))
+    decisions = pipeline.decide_all()
     write_output(decisions, out_path)
+    if diagnostics_path:
+        write_jsonl(pipeline.diagnostics, diagnostics_path)
     counts: dict[str, int] = {}
     for d in decisions:
         counts[d.decision] = counts.get(d.decision, 0) + 1

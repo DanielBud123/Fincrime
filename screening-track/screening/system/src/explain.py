@@ -5,12 +5,13 @@ labels do: a DOB mismatch cites the record that gave the customer's DOB (and
 the search result that gave the hit's), a location mismatch cites every record
 that contributed a customer country, a verified-name mismatch cites the check
 behind the name. Hit facts come from the hit itself and are not cited, except
-search results. The reason is two to four sentences with the hit's own facts.
+search results. The reason is two to four sentences with the hit's own facts,
+and it says plainly when a contradiction was seen but could not be relied on.
 """
 from __future__ import annotations
 
 from countries import display
-from decide import Assessment
+from decide import Assessment, Blocked
 from schema import COMPANY, CustomerFacts, Decision, FactCard, HitFacts
 
 
@@ -25,6 +26,10 @@ def _join(items, word="and"):
 
 def _names(codes):
     return _join([display(c) for c in codes], "and") if codes else "no country"
+
+
+def _kind(entity_type) -> str:
+    return "company" if entity_type == COMPANY else "person"
 
 
 def _hit_dobs_clause(h: HitFacts) -> str:
@@ -58,16 +63,14 @@ def _clear_sentence(code: str, c: CustomerFacts, h: HitFacts, a: Assessment, car
     """The sentence and evidence for one clear rule."""
     hit_name = a.agreeing_hit_name or (h.names[0] if h.names else "the hit")
     if code == "ENTITY_TYPE_MISMATCH":
-        return (f"The customer {c.legal_name} is a {'company' if c.entity_type == COMPANY else 'person'} "
-                f"({_join(c.record_ids)}) but the hit {hit_name} is a "
-                f"{'company' if h.entity_type == COMPANY else 'person'}, so they cannot be the same entity.",
-                list(c.record_ids))
+        return (f"The customer {c.legal_name} is a {_kind(c.entity_type)} ({_join(c.record_ids)}) but the hit "
+                f"{hit_name} is a {_kind(h.entity_type)}, so they cannot be the same entity.", list(c.record_ids))
     if code == "DECEASED":
         return (f"The hit's profile gives a date of death of {h.date_of_death}, before the customer "
                 f"{c.legal_name} was screened on {card.screened_at}.",
                 list(c.record_ids) + [f"{h.hit_id}#deceased_date"])
     if code == "TEMPORAL_IMPOSSIBILITY":
-        if c.entity_type == COMPANY:
+        if a.incorporated_after:
             text = (f"The customer was incorporated on {c.dob} ({c.dob_source_id}), after the hit's earliest "
                     f"dated report on {h.earliest_report_date}.")
         else:
@@ -83,6 +86,26 @@ def _clear_sentence(code: str, c: CustomerFacts, h: HitFacts, a: Assessment, car
     if code == "LOCATION_MISMATCH":
         return (f"The customer is linked only to {_names(c.countries)} but the hit is linked only to "
                 f"{_names(h.countries)}.", _country_evidence(c))
+    return "", []
+
+
+def _blocked_sentence(b: Blocked, c: CustomerFacts, h: HitFacts, card: FactCard) -> tuple[str, list[str]]:
+    """What points to a different entity, and why it was not relied on."""
+    if b.rule == "LOCATION_MISMATCH":
+        return (f"The customer's records point to {_names(c.countries)} and the hit to {_names(h.countries)}, "
+                f"but {b.why}, so the difference in country cannot clear the hit.", _country_evidence(c))
+    if b.rule == "DOB_MISMATCH":
+        return (f"The customer's date of birth {c.dob} ({c.dob_source_id}) differs from the hit's "
+                f"{_join(h.dobs, 'or')}, but {b.why}, so it cannot clear the hit.", _dob_evidence(c, h))
+    if b.rule == "NAME_MISMATCH_VERIFIED":
+        return (f"The customer's verified name {c.legal_name} ({c.name_source_id}) does not match the hit's name "
+                f"{_join(h.names[:2], 'or')}, but {b.why}, so the name cannot clear the hit.", [c.name_source_id])
+    if b.rule == "CONFIRMATION":
+        return (f"The customer's details on file agree with the hit, but {b.why}, so the match cannot be confirmed.",
+                list(c.record_ids))
+    if b.rule == "TEMPORAL_IMPOSSIBILITY":
+        return (f"The customer's date {c.dob} ({c.dob_source_id}) would rule out the hit's earliest report on "
+                f"{h.earliest_report_date}, but {b.why}, so it cannot clear the hit.", [c.dob_source_id])
     return "", []
 
 
@@ -124,6 +147,16 @@ def explain(card: FactCard, decision: Decision, a: Assessment) -> Decision:
         sentences.append(f"Both the customer and the hit are linked to {_names(a.common_countries)}.")
         sentences.append(f"The customer's name {a.agreeing_customer_name} agrees with the hit's name {hit_name}, "
                          f"and nothing contradicts the match.")
+    elif a.blocked:
+        # A contradiction was seen but rests on an incomplete or uncertain picture.
+        for b in a.blocked[:2]:
+            text, ev = _blocked_sentence(b, c, h, card)
+            if text:
+                sentences.append(text)
+                add_ev(ev)
+        if not evidence:
+            add_ev([c.customer_id])
+        sentences.append("Clearing on an uncertain fact would be unsafe, so the hit is left for a person to review.")
     else:  # REVIEW / INSUFFICIENT_DATA for one candidate
         # Cite what the reason states: the records behind the agreeing country; failing
         # that, the identity source and the record the link led to.
@@ -142,8 +175,8 @@ def explain(card: FactCard, decision: Decision, a: Assessment) -> Decision:
         if a.name_agrees:
             sentences.append(f"The customer's name {a.agreeing_customer_name} agrees with the hit's name {hit_name}.")
         elif not a.name_usable:
-            sentences.append(f"The customer's name {c.legal_name} has fewer than two real parts, so it can neither "
-                             f"confirm nor clear the hit.")
+            sentences.append(f"The customer's name {c.legal_name} cannot be compared with the hit's name part by "
+                             f"part, so it can neither confirm nor clear the hit.")
         elif c.name_verified:
             sentences.append(f"The customer's verified name {c.legal_name} agrees with the hit's name {hit_name} only "
                              f"partially, which is not enough to clear or confirm.")
@@ -168,7 +201,8 @@ def explain(card: FactCard, decision: Decision, a: Assessment) -> Decision:
                              "to confirm it, so it can be neither cleared nor confirmed.")
 
     decision.evidence_ids = evidence
-    decision.explanation = " ".join(sentences[:4])
+    decision.sentences = sentences[:4]
+    decision.explanation = " ".join(decision.sentences)
     return decision
 
 
@@ -197,9 +231,10 @@ def explain_ambiguous(alert_id: str, hit_id: str, results: list[tuple[Decision, 
         first = results[0][0]
         intro = (f"{len(results)} different people in the system of record fit the alert (records {people}), "
                  f"and each leads to the same decision.")
+        body = " ".join(first.sentences[:3]) if first.sentences else first.explanation   # four sentences in all
         return Decision(alert_id=alert_id, hit_id=hit_id, decision=first.decision, reason_code=first.reason_code,
                         evidence_ids=evidence, resolved_customer_id="AMBIGUOUS",
-                        explanation=f"{intro} {first.explanation}")
+                        explanation=f"{intro} {body}")
     outcomes = _join(sorted({f"{d.decision} ({d.reason_code})" for d, _ in results}), "and")
     return Decision(alert_id=alert_id, hit_id=hit_id, decision="REVIEW", reason_code="AMBIGUOUS_CUSTOMER_RECORD",
                     evidence_ids=evidence, resolved_customer_id="AMBIGUOUS",

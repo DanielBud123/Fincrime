@@ -9,12 +9,17 @@ Rule 8 in short:
 - single letters are initials, not parts; each distinct part counts once;
 - placeholders (NA, N/A, TEST, UNKNOWN, XXX, NONE, digits...) are not parts;
 - for companies the legal forms in name_variants.json are not parts;
-- two parts match when identical, in the same variant group, written together
-  or apart (Abdulsalam ~ Abdul Salam, counting as one part), or within an edit
-  budget set by the SHORTER part's length: <4 letters identical only,
-  4-6 letters 1 edit, 7+ letters 2 edits;
+- two parts match when identical, listed together in a variant group, written
+  together or apart (Abdulsalam ~ Abdul Salam, counting as one part), or
+  within an edit budget set by the SHORTER part's length: <4 letters identical
+  only, 4-6 letters 1 edit, 7+ letters 2 edits;
 - names agree when at least two parts match, or every part of the shorter
   name matches.
+
+Agreement uses the SOP reading only. A *mismatch that clears a hit* must hold
+under every reasonable way of splitting the name into parts
+(:func:`names_certainly_disagree`): apostrophes dropped or split, letters such
+as ø/ł/đ kept or transliterated, and for companies a wider list of legal forms.
 """
 from __future__ import annotations
 
@@ -33,36 +38,58 @@ PLACEHOLDERS = {
     "nil", "tbd", "tba", "unk", "placeholder", "anonymous", "noname", "nn",
 }
 
+# Readings of a name used only to decide whether a mismatch is certain.
+SOP, APOSTROPHE, TRANSLIT, WIDE_FORMS = "sop", "apostrophe", "translit", "wide-forms"
+PERSON_STYLES = (SOP, APOSTROPHE, TRANSLIT)
+COMPANY_STYLES = (SOP, APOSTROPHE, TRANSLIT, WIDE_FORMS)
+
+_TRANSLIT = str.maketrans({"ø": "o", "ł": "l", "đ": "d", "ð": "d", "þ": "th", "ß": "ss", "æ": "ae",
+                           "œ": "oe", "ı": "i", "ħ": "h", "ŋ": "n", "ĸ": "k"})
+# Legal forms and filler words beyond name_variants.json, for the lenient company reading only.
+_WIDE_LEGAL_FORMS = {
+    "pty", "pte", "sociedad", "anonima", "limitada", "ltda", "sasu", "eurl", "srls", "kgaa", "bhd", "sdn",
+    "aps", "kft", "zrt", "doo", "ood", "eood", "jsc", "ojsc", "pjsc", "cjsc", "ooo", "zao", "pao", "tbk",
+    "incorporated", "holding", "holdings", "group", "the", "and", "of", "de", "cie", "compagnie",
+    "gesellschaft", "societe", "societa", "per", "azioni", "responsabilita", "limitata", "national",
+    "association", "trust", "international", "global", "worldwide", "services", "solutions",
+}
+
 _BRACKETS_RE = re.compile(r"[\(\[\{][^\)\]\}]*[\)\]\}]")
 _PUNCT_RE = re.compile(r"[^\w\s]|_", re.UNICODE)
-
-
-class Variants:
-    """name_variants.json, loaded once: part -> group id, plus legal forms."""
-
-    def __init__(self, data: Optional[dict] = None):
-        data = data or {}
-        self.group_of: dict[str, int] = {}
-        groups = data.get("groups") or data.get("given_name_groups") or []
-        for i, group in enumerate(groups):
-            for part in group:
-                self.group_of[strip_accents(part.lower())] = i
-        self.legal_forms = {strip_accents(x.lower()) for x in data.get("company_legal_forms", [])}
-
-    def same_group(self, a: str, b: str) -> bool:
-        ga, gb = self.group_of.get(a), self.group_of.get(b)
-        return ga is not None and ga == gb
-
-
-EMPTY_VARIANTS = Variants()
+_APOSTROPHE_RE = re.compile(r"['\u2019`\u02bc]")
 
 
 def strip_accents(s: str) -> str:
     return "".join(ch for ch in unicodedata.normalize("NFKD", s) if not unicodedata.combining(ch))
 
 
+class Variants:
+    """name_variants.json, loaded once: part -> the groups it is listed in, plus
+    legal forms. A part can sit in more than one group (joseph is listed with
+    yusuf and with jose); two parts match when they share a group."""
+
+    def __init__(self, data: Optional[dict] = None):
+        data = data or {}
+        self.groups_of: dict[str, set[int]] = {}
+        groups = data.get("groups") or data.get("given_name_groups") or []
+        for i, group in enumerate(groups):
+            for part in group:
+                self.groups_of.setdefault(strip_accents(str(part).lower()), set()).add(i)
+        self.legal_forms = {strip_accents(str(x).lower()) for x in data.get("company_legal_forms", [])}
+
+    def same_group(self, a: str, b: str) -> bool:
+        ga, gb = self.groups_of.get(a), self.groups_of.get(b)
+        return bool(ga and gb and ga & gb)
+
+    def group_keys(self, part: str) -> list[str]:
+        return [f"@{g}" for g in sorted(self.groups_of.get(part, ()))]
+
+
+EMPTY_VARIANTS = Variants()
+
+
 def normalize_name(name: Optional[str], company: bool = False,
-                   variants: Variants = EMPTY_VARIANTS) -> list[str]:
+                   variants: Variants = EMPTY_VARIANTS, style: str = SOP) -> list[str]:
     """'Mohámed (Mo) Al-Hassan' -> ['mohamed', 'al', 'hassan'].
 
     Initials, placeholders and digit tokens are dropped; for companies the
@@ -71,8 +98,10 @@ def normalize_name(name: Optional[str], company: bool = False,
     if not name:
         return []
     s = strip_accents(str(name)).lower()
+    if style == TRANSLIT:
+        s = s.translate(_TRANSLIT)
     s = _BRACKETS_RE.sub(" ", s)
-    s = s.replace("'", "").replace("’", "")
+    s = _APOSTROPHE_RE.sub(" " if style == APOSTROPHE else "", s)
     s = _PUNCT_RE.sub(" ", s)
     parts = []
     for p in s.split():
@@ -82,6 +111,8 @@ def normalize_name(name: Optional[str], company: bool = False,
             continue
         if company and p in variants.legal_forms:
             continue
+        if company and style == WIDE_FORMS and p in _WIDE_LEGAL_FORMS:
+            continue
         if p not in parts:
             parts.append(p)
     return parts
@@ -90,6 +121,11 @@ def normalize_name(name: Optional[str], company: bool = False,
 def real_part_count(name: Optional[str], company: bool = False,
                     variants: Variants = EMPTY_VARIANTS) -> int:
     return len(normalize_name(name, company, variants))
+
+
+def has_latin_parts(name: Optional[str]) -> bool:
+    """A name we can compare: at least one real part written in Latin letters."""
+    return any(re.search(r"[a-z]", p) for p in normalize_name(name))
 
 
 @lru_cache(maxsize=200_000)
@@ -164,16 +200,33 @@ def matched_part_count(parts_a: list[str], parts_b: list[str],
     return best
 
 
-def names_agree(a: Optional[str], b: Optional[str], variants: Variants = EMPTY_VARIANTS,
-                company: bool = False) -> bool:
-    """True when the two names plausibly refer to the same name (rule 8)."""
-    pa = normalize_name(a, company, variants)
-    pb = normalize_name(b, company, variants)
+def _agree(pa: list[str], pb: list[str], variants: Variants) -> bool:
     if not pa or not pb:
         return False
     matches, shorter_covered = matched_part_count(pa, pb, variants)
-    shorter_len = min(len(pa), len(pb))
-    return matches >= MIN_MATCHED_PARTS or shorter_covered == shorter_len
+    return matches >= MIN_MATCHED_PARTS or shorter_covered == min(len(pa), len(pb))
+
+
+def names_agree(a: Optional[str], b: Optional[str], variants: Variants = EMPTY_VARIANTS,
+                company: bool = False) -> bool:
+    """True when the two names agree under rule 8 (the SOP reading)."""
+    return _agree(normalize_name(a, company, variants), normalize_name(b, company, variants), variants)
+
+
+def names_certainly_disagree(a: Optional[str], b: Optional[str], variants: Variants = EMPTY_VARIANTS,
+                             company: bool = False) -> bool:
+    """True only when the names disagree under every reading of their parts.
+    A name with no comparable part on either side is never a certain mismatch."""
+    for style in (COMPANY_STYLES if company else PERSON_STYLES):
+        pa = normalize_name(a, company, variants, style)
+        pb = normalize_name(b, company, variants, style)
+        if not pa or not pb:
+            return False
+        if not any(re.search(r"[a-z]", p) for p in pa) or not any(re.search(r"[a-z]", p) for p in pb):
+            return False
+        if _agree(pa, pb, variants):
+            return False
+    return True
 
 
 def any_name_agrees(name: Optional[str], others: Iterable[Optional[str]],

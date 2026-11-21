@@ -203,15 +203,20 @@ _TEXT_TERMS = sorted(
 _TEXT_RE = re.compile(r"(?<![\w])(" + "|".join(re.escape(t) for t in _TEXT_TERMS) + r")(?![\w])", re.IGNORECASE)
 
 
+# "the UK", "in the US": read only in capitals, because "us" is also a pronoun.
+_ABBREVIATION_RE = re.compile(r"(?<![\w.])(UK|US)(?![\w.])")
+
+
 def find_in_text(text: Optional[str]) -> list[tuple[str, str]]:
-    """[(ISO2, matched text)] for every country, code-free, written in the text.
-    Longest names win ("Papua New Guinea" before "Guinea"); 2-letter codes are
-    never read out of prose. "New Jersey" is the US state, "Georgia" followed by
-    ", United States" is the US state."""
+    """[(ISO2, matched text)] for every country written in the text, in order.
+    Longest names win ("Papua New Guinea" before "Guinea"). Two-letter ISO codes
+    are never read out of prose, except the abbreviations UK and US in capitals.
+    "New Jersey" is the US state, "Georgia" followed by ", United States" is the
+    US state."""
     if not text:
         return []
     folded = _fold(text)
-    out = []
+    found = []
     for m in _TEXT_RE.finditer(folded):
         term = m.group(1)
         code = _LOOKUP.get(term)
@@ -221,8 +226,11 @@ def find_in_text(text: Optional[str]) -> list[tuple[str, str]]:
             code = "US"
         if term == "jersey" and folded[max(0, m.start() - 4):m.start()].endswith("new "):
             code = "US"
-        out.append((code, text[m.start():m.end()]))
-    return out
+        found.append((m.start(), code, text[m.start():m.end()]))
+    for m in _ABBREVIATION_RE.finditer(text):
+        found.append((m.start(), "GB" if m.group(1) == "UK" else "US", m.group(1)))
+    found.sort(key=lambda item: item[0])
+    return [(code, shown) for _, code, shown in found]
 
 
 def codes_in_text(text: Optional[str]) -> list[str]:
@@ -231,3 +239,44 @@ def codes_in_text(text: Optional[str]) -> list[str]:
         if code not in out:
             out.append(code)
     return out
+
+
+# --- completeness: which field values could not be read as a country ---------
+
+def is_not_country(value: Optional[str]) -> bool:
+    """"International", "Europe" and the like: the SOP says these are not countries."""
+    if not value:
+        return True
+    s = _BRACKET_SUFFIX_RE.sub("", str(value)).strip().strip(".;,")
+    if not s:
+        return True
+    last = s.rsplit(",", 1)[-1] if "," in s else s
+    return _fold(s) in NOT_COUNTRIES or _fold(last) in NOT_COUNTRIES
+
+
+def field_codes(values: Iterable) -> tuple[list[str], list[str]]:
+    """(ISO2 codes, values that are neither a country nor a known non-country).
+
+    A clear on location needs every country tied to each side. A value we cannot
+    map might be a country written in a way we do not know, so the caller must
+    treat the list as incomplete when the second element is not empty."""
+    codes: list[str] = []
+    unmapped: list[str] = []
+    if values is None:
+        return codes, unmapped
+    if isinstance(values, str):
+        values = [values]
+    for v in values:
+        if v is None:
+            continue
+        for part in re.split(r"\s*;\s*", str(v)):
+            part = part.strip()
+            if not part:
+                continue
+            code = to_iso2(part)
+            if code:
+                if code not in codes:
+                    codes.append(code)
+            elif not is_not_country(part):
+                unmapped.append(part)
+    return codes, unmapped

@@ -1,10 +1,15 @@
 """Step 1: alert -> the customer(s) it is about.
 
 Follow the link the alert carries (account_ref, login_handle, email). An
-account can have joint holders; the screened name and date of birth pick the
-one who fits. Without a link, search the system of record for records that fit
-what was screened. Every fitting record is then merged into its person
-(step 2); the result is a list of persons, the linked one first.
+account can have joint holders; the screened details pick the one who fits,
+as in a search without a link. Without a link, search the system of record
+for the records that fit what was screened. Every fitting record is then
+merged into its person (step 2); the result is a list of persons.
+
+Finding too few people is the dangerous direction: if two people fit and we
+see one, we decide on one person's facts instead of saying the customer is
+ambiguous. So the search never excludes a record for a detail it lacks, and
+joint holders are only narrowed when one of them fits every screened detail.
 """
 from __future__ import annotations
 
@@ -15,7 +20,7 @@ from countries import to_iso2, to_iso2_list
 from customer_facts import merge_person
 from dates import PartialDate, parse_date
 from load import Data, clean, is_company, normalize_email, screened
-from names import names_agree, normalize_name, strip_accents
+from names import names_agree, strip_accents
 
 
 @dataclass
@@ -50,8 +55,8 @@ def name_fits(data: Data, record: dict, screened_name: Optional[str], company: b
     return False
 
 
-def dob_fits(record: dict, screened_dob: Optional[str]) -> bool:
-    return dates_compatible(parse_date(record.get("dob")), parse_date(screened_dob))
+def dob_fits(data: Data, record_id: str, screened_dob: Optional[PartialDate]) -> bool:
+    return dates_compatible(data.customer_dobs.get(record_id), screened_dob)
 
 
 def country_fits(record: dict, screened_country: Optional[str]) -> bool:
@@ -78,13 +83,15 @@ def city_fits(record: dict, screened_city: Optional[str]) -> bool:
     return False
 
 
-def fits(data: Data, record_id: str, s: dict, strict_name: bool = True) -> bool:
+def fits(data: Data, record_id: str, s: dict) -> bool:
     """Does this record fit the screened details? Missing details never exclude."""
     rec = data.customers[record_id]
     company = is_company(rec.get("entity_type")) or is_company(s.get("entity_type"))
-    if strict_name and not name_fits(data, rec, s.get("name"), company):
+    if not dob_fits(data, record_id, parse_date(s.get("dob"))):
         return False
-    return dob_fits(rec, s.get("dob")) and country_fits(rec, s.get("country")) and city_fits(rec, s.get("city"))
+    if not country_fits(rec, s.get("country")) or not city_fits(rec, s.get("city")):
+        return False
+    return name_fits(data, rec, s.get("name"), company)
 
 
 def _by_link(data: Data, alert: dict) -> tuple[list[str], str]:
@@ -115,23 +122,17 @@ def _by_link(data: Data, alert: dict) -> tuple[list[str], str]:
 
 def _search(data: Data, s: dict) -> list[str]:
     """Records that fit the screened details, found without a link.
-    Blocking: by birth year when a DOB was screened, else by name parts."""
-    company = is_company(s.get("entity_type"))
-    block: set[str] = set()
+
+    With a screened date of birth, a fitting record either has that birth year
+    or has no readable date of birth at all, so those two groups are the whole
+    candidate set. Without one, every record is a candidate.
+    """
     d = parse_date(s.get("dob"))
     if d:
-        block |= data.customers_by_birth_year.get(d.year, set())
-    parts = normalize_name(s.get("name"), company, data.variants)
-    if not d or not block:
-        for p in parts:
-            block |= data.customers_by_name_part.get(p, set())
-            g = data.variants.group_of.get(p)
-            if g is not None:
-                block |= data.customers_by_name_part.get(f"@{g}", set())
-    if not block:
-        block = set(data.customers)   # last resort: full scan
-    hits = [rid for rid in block if fits(data, rid, s)]
-    return sorted(hits)
+        block = set(data.customers_by_birth_year.get(d.year, set())) | set(data.customers_without_dob)
+    else:
+        block = set(data.customers)
+    return sorted(rid for rid in block if fits(data, rid, s))
 
 
 def resolve(data: Data, alert: dict) -> list[Candidate]:
@@ -139,9 +140,9 @@ def resolve(data: Data, alert: dict) -> list[Candidate]:
     ids, link = _by_link(data, alert)
     if ids:
         if len(ids) > 1:
+            # Joint holders: keep those who fit every screened detail. If nobody
+            # does, keep them all and let each be decided.
             fitting = [r for r in ids if fits(data, r, s)]
-            if not fitting:   # name alone may be a nickname or typo: fall back to the other details
-                fitting = [r for r in ids if fits(data, r, s, strict_name=False)]
             ids = fitting or ids
     else:
         ids = _search(data, s)

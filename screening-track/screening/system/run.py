@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Entry point: system/run <data folder> <output file>
+"""Entry point: system/run <data folder> <output file> [diagnostics file]
 
 Reads only the data folder and writes one JSON line per hit. Standard library
 only. Works as ``system/run dev output/dev.jsonl`` on Linux/macOS and as
 ``python system/run dev output/dev.jsonl`` anywhere.
+
+The optional third argument writes a diagnostics file: per hit, the facts
+found, the record each came from and what was unknown. It is not part of the
+submission format.
 """
 import os
 import sys
@@ -15,10 +19,10 @@ from pipeline import run  # noqa: E402
 
 
 def main(argv):
-    if len(argv) != 2:
-        print("usage: system/run <data folder> <output file>", file=sys.stderr)
+    if len(argv) not in (2, 3):
+        print("usage: system/run <data folder> <output file> [diagnostics file]", file=sys.stderr)
         return 2
-    run(argv[0], argv[1])
+    run(argv[0], argv[1], argv[2] if len(argv) == 3 else None)
     return 0
 
 

@@ -11,9 +11,10 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
-from dates import parse_date
+import dates
+from dates import PartialDate, parse_date
 from names import Variants, normalize_name, query_key
 
 FILES = {
@@ -27,6 +28,10 @@ FILES = {
     "search_results": "search_results.jsonl",
 }
 OPTIONAL_FILES = {"practice_labels": "practice_labels.jsonl"}
+
+COMPANY_TYPES = {"company", "organisation", "organization", "entity", "legal entity", "corporate",
+                 "corporation", "business", "firm"}
+PERSON_TYPES = {"individual", "person", "natural person", "private individual"}
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -94,8 +99,18 @@ def screened(alert: dict) -> dict:
 
 
 def is_company(entity_type: Optional[str]) -> bool:
-    return bool(entity_type) and entity_type.strip().lower() in {
-        "company", "organisation", "organization", "entity", "corporate", "business"}
+    return bool(entity_type) and str(entity_type).strip().lower() in COMPANY_TYPES
+
+
+def entity_kind(entity_type: Optional[str]) -> Optional[str]:
+    """'company', 'person', or None when the type is missing or not one we know
+    (a vessel, an aircraft). An unknown type never proves a type mismatch."""
+    t = (clean(entity_type) or "").lower()
+    if t in COMPANY_TYPES:
+        return "company"
+    if t in PERSON_TYPES:
+        return "person"
+    return None
 
 
 @dataclass
@@ -118,6 +133,8 @@ class Data:
     customers_by_phone: dict[str, list[str]]
     customers_by_name_part: dict[str, set[str]]
     customers_by_birth_year: dict[int, set[str]]
+    customers_without_dob: list[str]                # no date of birth, or one that could not be read
+    customer_dobs: dict[str, Optional[PartialDate]]
     customer_name_parts: dict[str, list[str]]      # record_id -> normalized full_name parts
     applicants_by_customer: dict[str, list[str]]
     customers_by_doc_number: dict[str, set[str]]   # approved checks only
@@ -134,6 +151,16 @@ def load(data_dir) -> Data:
     for key, fname in OPTIONAL_FILES.items():
         p = data_dir / fname
         raw[key] = read_jsonl(p) if p.exists() else []
+
+    # Day-first or month-first? Decide from the data before any date is read.
+    structured = [c.get("dob") for c in raw["customers"]] + [k.get("verified_dob") for k in raw["kyc_checks"]]
+    structured += [screened(a).get("dob") for a in raw["alerts"]]
+    for h in raw["hits"]:
+        structured += as_list(h.get("dobs")) + [h.get("deceased_date")]
+    dates.set_numeric_order(dates.detect_numeric_order(structured), "default")
+    # The bank's notes have their own evidence. Watchlist profiles and search
+    # snippets are other people's text and are never assumed to share it.
+    dates.set_numeric_order(dates.detect_numeric_order(n.get("text") for n in raw["notes"]), "text")
 
     variants_path = data_dir / "name_variants.json"
     variants = Variants(json.loads(variants_path.read_text(encoding="utf-8"))) if variants_path.exists() else Variants()
@@ -161,7 +188,8 @@ def load(data_dir) -> Data:
     for k in raw["kyc_checks"]:
         kyc_by_applicant[k["applicant_id"]].append(k)
     for checks in kyc_by_applicant.values():       # most recent first, stable on check_id
-        checks.sort(key=lambda k: ((parse_date(k.get("checked_at")) or parse_date("1800")).iso(), k["check_id"]), reverse=True)
+        checks.sort(key=lambda k: ((parse_date(k.get("checked_at")) or PartialDate(dates.MIN_YEAR)).iso(),
+                                   k["check_id"]), reverse=True)
 
     notes_by_email = defaultdict(list)
     for n in raw["notes"]:
@@ -177,7 +205,7 @@ def load(data_dir) -> Data:
 
     customers_by_email, customers_by_phone = defaultdict(list), defaultdict(list)
     customers_by_name_part, customers_by_birth_year = defaultdict(set), defaultdict(set)
-    customer_name_parts = {}
+    customer_name_parts, customer_dobs, customers_without_dob = {}, {}, []
     for rid, c in customers.items():
         e = normalize_email(c.get("email"))
         if e:
@@ -186,23 +214,24 @@ def load(data_dir) -> Data:
         if p:
             customers_by_phone[p].append(rid)
         company = is_company(c.get("entity_type"))
-        parts = normalize_name(c.get("full_name"), company, variants)
-        customer_name_parts[rid] = parts
+        customer_name_parts[rid] = normalize_name(c.get("full_name"), company, variants)
         for name in (c.get("full_name"), c.get("preferred_name"), c.get("login_name")):
             for part in normalize_name(name, company, variants):
                 customers_by_name_part[part].add(rid)
-                g = variants.group_of.get(part)
-                if g is not None:
-                    customers_by_name_part[f"@{g}"].add(rid)
+                for key in variants.group_keys(part):
+                    customers_by_name_part[key].add(rid)
         d = parse_date(c.get("dob"))
+        customer_dobs[rid] = d
         if d:
             customers_by_birth_year[d.year].add(rid)
+        else:
+            customers_without_dob.append(rid)
 
     customers_by_doc_number = defaultdict(set)
     for rid, apps in applicants_by_customer.items():
         for app in apps:
             for k in kyc_by_applicant.get(app, []):
-                if (k.get("result") or "").lower() == "approved" and clean(k.get("document_number")):
+                if (k.get("result") or "").strip().lower() == "approved" and clean(k.get("document_number")):
                     customers_by_doc_number[k["document_number"].strip().upper()].add(rid)
 
     return Data(
@@ -218,6 +247,7 @@ def load(data_dir) -> Data:
         search_by_query=dict(search_by_query),
         customers_by_email=dict(customers_by_email), customers_by_phone=dict(customers_by_phone),
         customers_by_name_part=dict(customers_by_name_part), customers_by_birth_year=dict(customers_by_birth_year),
+        customers_without_dob=sorted(customers_without_dob), customer_dobs=customer_dobs,
         customer_name_parts=customer_name_parts,
         applicants_by_customer=dict(applicants_by_customer),
         customers_by_doc_number=dict(customers_by_doc_number),

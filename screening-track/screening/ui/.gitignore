@@ -1,0 +1,7 @@
+# Built from the data room (fact cards, note text, hit profiles): local only, never commit.
+# Rebuild with: python tools/build_ui_data.py
+data.js
+data.js.tmp
+
+# Screenshots show the same participant-only records. Delete this line to commit them.
+screenshots/

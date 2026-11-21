@@ -10,3 +10,6 @@ __pycache__/
 .cache/
 .pytest_cache/
 screening-track/screening/output/*.tmp
+
+# Diagnostics hold full fact cards (customer names, dates of birth): local only
+screening-track/screening/output/*.diagnostics.jsonl
