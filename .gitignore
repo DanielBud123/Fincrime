@@ -1,19 +1,18 @@
 # Participant-only data: never commit
-screening-track/screening/dev/
-screening-track/screening/*.xlsx
+dev/
 *.xlsx
 *.zip
+
+# Diagnostics and reviews hold full fact cards (customer names, dates of birth): local only
+output/*.diagnostics.jsonl
+output/*.llm_review.jsonl
+output/*.tmp
+
+# API keys
+.env
 
 # Local artefacts
 __pycache__/
 *.pyc
 .cache/
 .pytest_cache/
-screening-track/screening/output/*.tmp
-
-# Diagnostics hold full fact cards (customer names, dates of birth): local only
-screening-track/screening/output/*.diagnostics.jsonl
-
-# From decision/stop-1-schema: the data folder wherever it sits, and API keys
-dev/
-.env

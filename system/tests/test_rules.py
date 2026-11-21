@@ -1,5 +1,5 @@
 """The 17 examples from the team brief plus date, name and extraction checks.
-Run:  python -m unittest discover -s system/tests   (from screening/)"""
+Run:  python -m unittest discover -s system/tests   (from the repository root)"""
 import json
 import os
 import sys

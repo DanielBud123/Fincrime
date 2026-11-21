@@ -1,6 +1,6 @@
 """The 17 examples from the decision-half brief (CLAUDE.md), plus partial-date
 and short-name edge cases. Unshown fields take the brief's example fact card.
-Run:  python -m unittest discover -s system/tests   (from screening/)"""
+Run:  python -m unittest discover -s system/tests   (from the repository root)"""
 import os
 import sys
 import unittest

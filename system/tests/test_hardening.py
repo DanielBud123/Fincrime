@@ -4,7 +4,7 @@ Every reader has two lists: sentences it must read, and look-alikes it must
 leave unknown. A wrong fact can clear a hit (cost 60); an unknown costs a
 review (2-3). So the second list matters more than the first.
 
-Run:  python -m unittest discover -s system/tests   (from screening/)
+Run:  python -m unittest discover -s system/tests   (from the repository root)
 """
 import json
 import os

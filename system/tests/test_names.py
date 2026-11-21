@@ -1,5 +1,5 @@
 """POLICY.md principle 8 on the name pairs from the practice labels.
-Run:  python -m unittest discover -s system/tests   (from screening/)
+Run:  python -m unittest discover -s system/tests   (from the repository root)
 Uses an inline slice of name_variants.json so it needs no data folder."""
 import os
 import sys

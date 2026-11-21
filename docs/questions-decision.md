@@ -16,7 +16,7 @@ Kept apart from `docs/questions.md` (data half) until we merge. Decisions taken 
 > with "Starling Logistics" but not the other way round, so whether H-124BB8 was cleared depended on argument order.
 > Not taken: this branch's `names.py` and `decide.py` as files (they predate the completeness gates the data side
 > now relies on), its `output/dev.jsonl`, and the STOP 1 drafts at the repo root (`system/src/schema.py`,
-> `system/docs/questions.md`), superseded by `screening-track/screening/system/src/schema.py`.
+> `system/docs/questions.md`), superseded by `system/src/schema.py`.
 > Result: all 27 of this branch's tests pass with the rest; dev decisions are unchanged.
 
 ## For the 15:00 mentors

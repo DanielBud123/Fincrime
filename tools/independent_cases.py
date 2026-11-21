@@ -2,7 +2,7 @@
 
 Written outside Claude Code, from the SOP and from how a payments company's
 support desk, KYC providers (Sumsub/Veriff/Persona/Onfido) and watchlist
-providers actually write. Run from screening-track/screening/:
+providers actually write. Run from the repository root:
 
     python tools/independent_cases.py
 
