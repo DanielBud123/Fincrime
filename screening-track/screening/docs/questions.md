@@ -38,27 +38,3 @@ Decisions we took in code are marked **(we do X)**.
   alone decides NAME_MISMATCH_VERIFIED)**
 - Which reason code when two clear rules fire? **(labels accept any; we use the SOP order: type, death, time,
   DOB, verified name, location)**
-- Does a 1-year birth-year gap count as "agree" for confirmation? **(no: neither agrees nor contradicts → REVIEW)**
-- Declared name agrees but verified legal name does not: clear on NAME_MISMATCH_VERIFIED? **(yes, §6 "even if the
-  name on their record does")**
-- Placeholder "digits and the like": pure-digit tokens only, or mixed tokens like "N26" (label H-24D490)?
-  **(pure digits only)**
-- Partial date of death (`"2022-03"`) vs screened_at: **(clear only when every completion is before screening)**
-- A name listed in two variant groups (joseph/joe are in the Yusuf group and the Joseph group): match against
-  either group? **(yes: Yusuf ~ Joseph)**
-
-## Team (decision half ↔ data half), from STOP 1/STOP 2
-- Fact card: the provenance fields in `schema.py` (record_ids, name/dob source ids, country_sources, hit
-  dob_source_ids) and `customer_record_id = AMBIGUOUS` whenever >1 person fits match the STOP 1 proposal.
-  **Agreed; the superset card replaces the STOP 1 branch's schema.py.**
-- Layout: the brief calls `system/run` and wants `system/` and `output/` in the repo. Proposal: move
-  `screening-track/screening/{system,output,docs}` to the repo root before submission (one `git mv` commit).
-- `names.py` (decision half) replaces the provisional one; same API. Fix: a part in two variant groups now
-  matches either (`Variants.groups_of`). `Variants.group_of` (one id per part, used for name blocking in
-  `load.py` / `resolve_customer.py`) keeps the lowest group id, so a no-link, no-DOB search for "Yusuf" will not
-  block in a "Joseph" record. Low impact (every no-link alert has a DOB); index all groups if needed.
-- Unsafe-clear surfaces to harden before freeze (data half): identity notes count as approved unless negative
-  wording, and their CAPS-extracted name sets `name_verified` (can fire NAME_MISMATCH_VERIFIED); note-derived
-  DOBs feed DOB_MISMATCH/TEMPORAL; `BIRTH_RE` reads "gave birth in 2010" as a DOB; `DD/MM/YYYY` assumed day-first;
-  hit countries missing from the country table are dropped silently; the no-link search blocks by birth year,
-  so records with no parseable DOB are never found. Reasons are sometimes one sentence (brief asks 2–4).

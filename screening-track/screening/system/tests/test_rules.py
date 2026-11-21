@@ -17,7 +17,7 @@ from schema import CustomerFacts, FactCard, HitFacts  # noqa: E402
 VARIANTS_PATH = os.path.join(HERE, "..", "..", "dev", "name_variants.json")
 V = Variants(json.load(open(VARIANTS_PATH, encoding="utf-8"))) if os.path.exists(VARIANTS_PATH) else Variants(
     {"groups": [["muhammad", "mohammed", "mohammad", "mohamed"], ["hassan", "hasan"], ["thomas", "tom"]],
-     "company_legal_forms": ["ltd", "limited", "sa", "se", "inc", "llc"]})
+     "company_legal_forms": ["ltd", "limited", "sa", "inc", "llc"]})
 
 
 def card(cust=None, hit=None, screened_at="2024-03-15"):
