@@ -93,6 +93,14 @@ independent set:
 Still unread, on purpose: three dev notes say the document is "dated 1952-01-21". That is very likely the
 date of birth, but it could be an issue date, so it stays unknown and blocks clears that would rest on it.
 
+## Merge with the decision half (decision/names-decide)
+
+| # | Finding | Fix | Effect |
+|---|---|---|---|
+| 29 | Name agreement depended on argument order: "stlogistics" written together matched "logistics" with two edits, and coverage was counted on the first name only when both names had as many parts. H-124BB8's verified-name clear held only because the customer's name is passed first | The decision half's rule: a joined pair gets the edit budget of its shortest piece, and coverage counts on both names | Order-dependent pairs on dev: 0 of 3,479. One reason text changed (H-5EEC5A: "Mun Chen" written together is "München", so the secondary name mismatch it cited was wrong); no decision changed |
+| 30 | `decide.py` took the customer's name-part count from a field the caller can leave at 0, so a hand-built fact card was treated as having no usable name | Count the parts inside `decide.py` from the card's names; only a name with two or more real parts can agree (the decision half's per-name reading) | No dev change; the decision half's 27 tests now pass |
+| 31 | An onboarding note saying the customer "gave birth on 2010-05-01" gave that date as her date of birth | "gave/give/giving birth" is not a birth word | No dev change |
+
 ## Tried and reverted
 
 These are the changes that made things worse. They are the reason for the "reading more is not safer" rule.

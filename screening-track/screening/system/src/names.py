@@ -151,53 +151,65 @@ def edit_budget(shorter_len: int) -> int:
     return 2
 
 
-def parts_match(a: str, b: str, variants: Variants = EMPTY_VARIANTS) -> bool:
+def parts_match(a: str, b: str, variants: Variants = EMPTY_VARIANTS, shortest: Optional[int] = None) -> bool:
+    """``shortest`` overrides the length that sets the edit budget (see _units)."""
     if a == b:
         return True
     if variants.same_group(a, b):
         return True
-    budget = edit_budget(min(len(a), len(b)))
+    budget = edit_budget(min(len(a), len(b)) if shortest is None else shortest)
     if budget and abs(len(a) - len(b)) <= budget and levenshtein(a, b) <= budget:
         return True
     return False
 
 
-def _units(parts: list[str]) -> list[tuple[str, frozenset]]:
+def _units(parts: list[str]) -> list[tuple[str, frozenset, int]]:
     """Single parts plus adjacent pairs written together ('abdul'+'salam' ->
-    'abdulsalam'). Each unit remembers which part indexes it covers so a part
-    is never counted twice."""
-    units = [(p, frozenset([i])) for i, p in enumerate(parts)]
+    'abdulsalam'). Each unit remembers which part indexes it covers, so a part
+    is never counted twice, and the length of its shortest piece: a joined pair
+    gets the edit budget of its shortest piece, so 'st'+'logistics' cannot
+    absorb 'st' as two free edits against 'logistics' (from decision/names-decide)."""
+    units = [(p, frozenset([i]), len(p)) for i, p in enumerate(parts)]
     for i in range(len(parts) - 1):
-        units.append((parts[i] + parts[i + 1], frozenset([i, i + 1])))
+        units.append((parts[i] + parts[i + 1], frozenset([i, i + 1]), min(len(parts[i]), len(parts[i + 1]))))
     return units
+
+
+def _best_matching(parts_a: list[str], parts_b: list[str],
+                   variants: Variants = EMPTY_VARIANTS) -> tuple[int, int, int]:
+    """Over every one-to-one matching of units: the most matches, and the most
+    parts of A and of B covered. A joined pair is only compared with a single
+    part, and counts as one match covering both its parts."""
+    ua, ub = _units(parts_a), _units(parts_b)
+    edges = [(ua[i][1], ub[j][1]) for i in range(len(ua)) for j in range(len(ub))
+             if not (len(ua[i][1]) > 1 and len(ub[j][1]) > 1)
+             and parts_match(ua[i][0], ub[j][0], variants, min(ua[i][2], ub[j][2]))]
+    best = [0, 0, 0]
+
+    def search(k: int, used_a: frozenset, used_b: frozenset, count: int):
+        best[0] = max(best[0], count)
+        best[1] = max(best[1], len(used_a))
+        best[2] = max(best[2], len(used_b))
+        for n in range(k, len(edges)):
+            ca, cb = edges[n]
+            if not (ca & used_a or cb & used_b):
+                search(n + 1, used_a | ca, used_b | cb, count + 1)
+
+    search(0, frozenset(), frozenset(), 0)
+    return best[0], best[1], best[2]
 
 
 def matched_part_count(parts_a: list[str], parts_b: list[str],
                        variants: Variants = EMPTY_VARIANTS) -> tuple[int, int]:
-    """Maximum number of distinct A-parts that can be matched to distinct
-    B-parts (a joined pair counts as one match covering both parts).
-    Returns (matches, parts_of_shorter_name_covered)."""
-    ua, ub = _units(parts_a), _units(parts_b)
-    # A joined pair may only be compared with a single part of the other name.
-    pairs = [(i, j) for i, (ta, ca) in enumerate(ua) for j, (tb, cb) in enumerate(ub)
-             if not (len(ca) > 1 and len(cb) > 1) and parts_match(ta, tb, variants)]
-    best = (0, 0)
-
-    def search(idx, used_a, used_b, count):
-        nonlocal best
-        covered_a, covered_b = len(used_a), len(used_b)
-        shorter_cov = covered_a if len(parts_a) <= len(parts_b) else covered_b
-        if (count, shorter_cov) > best:
-            best = (count, shorter_cov)
-        for k in range(idx, len(pairs)):
-            i, j = pairs[k]
-            ca, cb = ua[i][1], ub[j][1]
-            if ca & used_a or cb & used_b:
-                continue
-            search(k + 1, used_a | ca, used_b | cb, count + 1)
-
-    search(0, frozenset(), frozenset(), 0)
-    return best
+    """(matches, parts of the shorter name covered). When both names have as
+    many parts, either one fully covered counts, so the result never depends
+    on which name is passed first."""
+    matches, covered_a, covered_b = _best_matching(parts_a, parts_b, variants)
+    if len(parts_a) < len(parts_b):
+        return matches, covered_a
+    if len(parts_b) < len(parts_a):
+        return matches, covered_b
+    return matches, max(covered_a, covered_b)
 
 
 def _agree(pa: list[str], pb: list[str], variants: Variants) -> bool:

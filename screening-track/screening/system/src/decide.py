@@ -1,9 +1,10 @@
 """Step 5: the rules of POLICY.md, as code. Pure functions: a fact card in, a
 decision out. No file reading.
 
-PROVISIONAL: this file belongs to the decision half; it follows POLICY.md
-principles 6-8 and the check order agreed in the team brief. Replace with the
-teammate's version at join-up if theirs differs.
+Joined up with the decision half (branch decision/names-decide): its tests
+(test_decide.py, test_names.py) run against this module, and decide_hit()
+below is its interface, taken unchanged. Its rule order and partial-date
+readings are the ones this module follows.
 
 Clear only on a contradiction, confirm only on agreement, otherwise REVIEW.
 
@@ -22,7 +23,7 @@ from typing import Optional
 
 from dates import PartialDate, age_bounds_at, parse_date
 from names import EMPTY_VARIANTS, Variants, has_latin_parts, names_agree, names_certainly_disagree, normalize_name
-from schema import COMPANY, PERSON, Decision, FactCard
+from schema import COMPANY, PERSON, CustomerFacts, Decision, FactCard, HitFacts
 
 UNDER_AGE = 16          # POLICY.md principle 6: younger than 16 at the earliest dated report
 YEAR_TOLERANCE = 1      # birth year more than 1 year outside the hit's -> contradiction
@@ -150,12 +151,18 @@ def assess(card: FactCard, variants: Variants = EMPTY_VARIANTS) -> Assessment:
     a.type_mismatch = bool(c.entity_type and h.entity_type and c.entity_type != h.entity_type)
 
     # Names. Rule 8: an individual customer whose names have fewer than two real
-    # parts can be neither confirmed nor cleared on name.
+    # parts can be neither confirmed nor cleared on name. Read per name, as the
+    # decision half does: only a customer name with two or more real parts can
+    # agree, and a one-part verified name never clears. The parts are counted here
+    # from the card's own names, not taken from a field a caller may leave unset.
     comparable = [hn for hn in h.names if has_latin_parts(hn)]
-    a.name_usable = bool(comparable) and not (a.kind == PERSON and c.real_name_parts < 2)
+    own_company = c.entity_type == COMPANY
+    usable_names = [n for n in [c.legal_name] + list(c.other_names)
+                    if n and not (a.kind == PERSON and len(normalize_name(n, own_company, variants)) < 2)]
+    a.name_usable = bool(comparable) and bool(usable_names)
     legal_agrees = False
     if a.name_usable:
-        for cn in [c.legal_name] + list(c.other_names):
+        for cn in usable_names:
             hit = next((hn for hn in comparable if names_agree(cn, hn, variants, company)), None)
             if hit:
                 a.name_agrees, a.agreeing_hit_name, a.agreeing_customer_name = True, hit, cn
@@ -255,3 +262,29 @@ def decide(card: FactCard, variants: Variants = EMPTY_VARIANTS) -> tuple[Decisio
     if company_match:
         return d("SAME_ENTITY", "NAME_LOCATION_MATCH")
     return d("REVIEW", "INSUFFICIENT_DATA")
+
+
+# ---------------------------------------------------------------------------
+# several people: the decision-half interface (from decision/names-decide)
+# ---------------------------------------------------------------------------
+
+def decide_hit(alert_id: str, hit: HitFacts, candidates: list[CustomerFacts], screened_at: Optional[str],
+               variants=EMPTY_VARIANTS) -> Decision:
+    """One hit against every person who fits the alert (candidates ordered by
+    link strength). No candidate -> REVIEW with no customer. Several people ->
+    the shared decision, or REVIEW / AMBIGUOUS_CUSTOMER_RECORD when they differ;
+    either way the customer record is AMBIGUOUS (POLICY.md principle 3)."""
+    from explain import explain, explain_ambiguous   # explain imports Assessment from here
+
+    if not candidates:
+        return Decision(alert_id=alert_id, hit_id=hit.hit_id, decision="REVIEW", reason_code="INSUFFICIENT_DATA",
+                        evidence_ids=list(hit.source_ids), resolved_customer_id=None,
+                        explanation="No customer record could be resolved for this alert, so the hit cannot be "
+                                    "compared with anyone and is left for a human to review.")
+    results = []
+    for cust in candidates:
+        card = FactCard(alert_id=alert_id, hit_id=hit.hit_id, screened_at=screened_at, customer=cust, hit=hit)
+        results.append((explain(card, *decide(card, variants)), card))
+    if len(results) == 1:
+        return results[0][0]
+    return explain_ambiguous(alert_id, hit.hit_id, results)

@@ -132,7 +132,7 @@ TITLE_NAME_ANCHOR_RE = re.compile(
 # The date of birth sits right after a birth word ("born on", "DOB:", "Date of birth on document:").
 _BIRTH_BEFORE_RE = re.compile(
     r"(?:\bborn(?:\s+in\s+(?-i:[A-ZÀ-Þ])[\w'’.-]*(?:\s+(?-i:[A-ZÀ-Þ])[\w'’.-]*){0,2})?"   # "born in Bangladesh on"
-    r"|\bbirth ?date|\bdate of birth|\bd\.?o\.?b\b\.?|\bbirth)"
+    r"|\bbirth ?date|\bdate of birth|\bd\.?o\.?b\b\.?|(?<!gave )(?<!give )(?<!giving )(?<!gives )\bbirth)"   # "gave birth" is not her own
     r"(?:\s+(?:on|in|is|was|of|as|at|set|to|be|recorded|given|shown|listed|stated|noted|registered|entered|"
     r"being|date|document|the|per|file|id|record|reads|showing|indicated))*"
     r"[\s:,(–-]*$", re.I)

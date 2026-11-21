@@ -13,3 +13,7 @@ screening-track/screening/output/*.tmp
 
 # Diagnostics hold full fact cards (customer names, dates of birth): local only
 screening-track/screening/output/*.diagnostics.jsonl
+
+# From decision/stop-1-schema: the data folder wherever it sits, and API keys
+dev/
+.env

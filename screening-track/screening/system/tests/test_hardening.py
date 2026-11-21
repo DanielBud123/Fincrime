@@ -376,6 +376,7 @@ class TestIdentityNotes(unittest.TestCase):
                      "ANA LOPEZ verified, DOB 2020-05-01.",                                     # a small child: implausible
                      "Sumsub verified ANA LOPEZ on 2024-01-02; previous check 2010-03-03; document issued 2019-06-06.",
                      "RASEL KHAN was verified on 2024-06-04 with a national ID dated 1952-01-21.",    # could be an issue date
+                     "ANA LOPEZ verified on 2024-01-02; she gave birth on 2010-05-01.",               # her child's birth, not hers
                      "DOB in system updated on 2010-01-02 for ANA LOPEZ.",                             # not a birth date
                      "KYC refresh for ANA LOPEZ scheduled for 2025-01-02."]:
             self.assertIsNone(_dob_from_note(text, created), text)
@@ -392,6 +393,18 @@ class TestNames(unittest.TestCase):
         self.assertTrue(names_agree("Yusuf Ali", "Joseph Ali", V))
         self.assertTrue(names_agree("Joe Garcia", "Jose Garcia", V))
         self.assertFalse(names_agree("Yusuf Garcia", "Jose Garcia", V))      # never listed together
+
+    def test_agreement_does_not_depend_on_the_order_of_the_names(self):
+        # 'st'+'logistics' written together once matched 'logistics' with two free edits, but only in one order,
+        # so a verified-name clear depended on which name was passed first (dev hit H-124BB8).
+        pairs = [("Starling Logistics Ltd", "ST Logistics (UK) Ltd.", True, False),
+                 ("Abdel Rahman Musa", "Abdulrahman Musa", False, True),
+                 ("Abdul Salam Yusuf", "Abdulsalam Yusuf", False, True),
+                 ("Mohamed Ali Hassan", "Muhammad Hasan", False, True),
+                 ("Jonathan Reyes Whitfield", "John Whitfield", False, False)]
+        for a, b, company, expected in pairs:
+            self.assertEqual(names_agree(a, b, V, company=company), expected, f"{a} ~ {b}")
+            self.assertEqual(names_agree(b, a, V, company=company), expected, f"{b} ~ {a}")
 
     def test_a_clearing_mismatch_must_hold_under_every_reading(self):
         self.assertTrue(names_certainly_disagree("Jonathan Reyes Whitfield", "John Whitfield", V))
