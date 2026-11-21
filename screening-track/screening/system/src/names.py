@@ -106,17 +106,22 @@ def edit_budget(shorter_len: int) -> int:
     return 1 if shorter_len < ONE_EDIT_BELOW else 2
 
 
-def parts_match(a: str, b: str, variants=EMPTY_VARIANTS) -> bool:
+def parts_match(a: str, b: str, variants=EMPTY_VARIANTS, shortest: Optional[int] = None) -> bool:
+    """`shortest` overrides the length that sets the edit budget (see _units)."""
     if a == b or _as_variants(variants).same_group(a, b):
         return True
-    budget = edit_budget(min(len(a), len(b)))
+    budget = edit_budget(min(len(a), len(b)) if shortest is None else shortest)
     return budget > 0 and abs(len(a) - len(b)) <= budget and levenshtein(a, b) <= budget
 
 
-def _units(parts: list[str]) -> list[tuple[str, frozenset]]:
-    """Each part, plus each adjacent pair written together ('abdul'+'salam')."""
-    units = [(p, frozenset([i])) for i, p in enumerate(parts)]
-    units += [(parts[i] + parts[i + 1], frozenset([i, i + 1])) for i in range(len(parts) - 1)]
+def _units(parts: list[str]) -> list[tuple[str, frozenset, int]]:
+    """Each part, plus each adjacent pair written together ('abdul'+'salam').
+    The third item is the shortest part inside the unit: a joined pair gets the
+    edit budget of its shortest piece, so 'st'+'logistics' cannot absorb 'st'
+    as two free edits against 'logistics'."""
+    units = [(p, frozenset([i]), len(p)) for i, p in enumerate(parts)]
+    units += [(parts[i] + parts[i + 1], frozenset([i, i + 1]), min(len(parts[i]), len(parts[i + 1])))
+              for i in range(len(parts) - 1)]
     return units
 
 
@@ -126,7 +131,8 @@ def _best_matching(pa: list[str], pb: list[str], variants: Variants) -> tuple[in
     part, and counts as one match covering both its parts."""
     ua, ub = _units(pa), _units(pb)
     edges = [(ua[i][1], ub[j][1]) for i in range(len(ua)) for j in range(len(ub))
-             if not (len(ua[i][1]) > 1 and len(ub[j][1]) > 1) and parts_match(ua[i][0], ub[j][0], variants)]
+             if not (len(ua[i][1]) > 1 and len(ub[j][1]) > 1)
+             and parts_match(ua[i][0], ub[j][0], variants, min(ua[i][2], ub[j][2]))]
     best = [0, 0, 0]
 
     # ponytail: exhaustive search; names have a handful of parts so it is tiny.

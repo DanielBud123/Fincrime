@@ -48,6 +48,11 @@ class TestAgree(unittest.TestCase):
         self.check("CHINEDU AZEEZ", "Ridwan, Azeez", False)                    # label H-2808BE
         self.check("SARAH JOHNSON", "Johnson, James Jacob", False)             # label H-380854
         self.check("", "Mohamed Hassan", False)
+        # dev hit H-124BB8: 'st'+'logistics' must not match 'logistics' with 2 free edits
+        self.check("Starling Logistics Ltd", "ST Logistics (UK) Ltd.", False, company=True)
+
+    def test_joined_parts_keep_their_edit_budget(self):
+        self.check("Abdel Rahman Musa", "Abdulrahman Musa", True)              # 1 edit, shortest piece 5 letters
 
 
 if __name__ == "__main__":

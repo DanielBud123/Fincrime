@@ -14,10 +14,18 @@ Kept apart from `docs/questions.md` (data half) until we merge. Decisions taken 
 - Partial date of death (`"2022-03"`) vs screened_at. **(clear only when every completion is before screening)**
 - A part listed in two variant groups (joseph/joe are in the Yusuf group and the Joseph group): match either group?
   **(yes: Yusuf ~ Joseph)**
+- Parts written together or apart, with spelling edits (Abdel Rahman ~ Abdulrahman)? **(yes, but a joined pair
+  gets the edit budget of its shortest piece: "ST Logistics" does not match "Starling Logistics", dev hit H-124BB8)**
 - Which reason code when two clear rules fire? **(labels accept any; order: type, death, time, DOB, verified name,
   location)**
 
 ## For the data half (at merge)
+- **URGENT, 3 unsafe clearances:** `customer_facts.py:217` and `:219` hold literal backspace bytes (`\x08`) where
+  `\b` was meant, so `RESIDENCE_RE` never matches and no "lived/worked in X" note adds a customer country. The
+  committed `output/dev.jsonl` clears H-FF3096, H-7F2A6C and H-A22C42 on LOCATION_MISMATCH; the labels say REVIEW
+  (cost 60 each, decision score 0). Replacing the two bytes with `\b` (checked in a scratch copy, not committed):
+  50/50 practice labels, 0 unsafe, decision score 100; 461 cleared, 122 confirmed, 236 review. With that fix the
+  decision-half modules give the same decision and reason code as the provisional ones on all 819 dev hits.
 - Interface: `decide(card, variants)` returns `(Decision, Assessment)` like the provisional version, not a bare
   `Decision` as the brief says, so explain.py keeps writing evidence and reasons. `decide_hit(alert_id, hit,
   candidates, screened_at, variants)` exists per the brief; pipeline.py does the same loop itself today.
