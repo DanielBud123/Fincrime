@@ -10,3 +10,7 @@ __pycache__/
 .cache/
 .pytest_cache/
 screening-track/screening/output/*.tmp
+
+# From decision/stop-1-schema
+dev/
+.env
